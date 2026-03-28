@@ -12,8 +12,8 @@
 #   TW_TEMP_HOT=75           °C orange threshold
 #   TW_TEMP_CRIT=85          °C red threshold (also temp bar max)
 #   TW_CPU_MAX_MHZ=5400      CPU freq bar ceiling
-#   TW_GPU_MAX_MHZ=2175      GPU core clock bar ceiling
-#   TW_MEM_MAX_MHZ=9500      GPU mem clock bar ceiling
+#   TW_GPU_MAX_MHZ=2400      GPU core clock bar ceiling (0 = auto from nvidia-smi)
+#   TW_MEM_MAX_MHZ=9001      GPU mem clock bar ceiling
 #   TW_FAN_MAX_RPM=5500      fan RPM bar ceiling
 #   TW_NO_NVIDIA=1           disable all nvidia-smi calls
 #
@@ -59,20 +59,34 @@ syswatch() {
   local v vp vc
   local rp rc
 
+  # ── script defaults — edit these, or override via env vars before calling ────
+  : ${TW_INTERVAL:=0.5}        # refresh interval (seconds)
+  : ${TW_INTERVAL_MIN:=0.5}    # minimum interval (+key floor)
+  : ${TW_INTERVAL_MAX:=10}     # maximum interval (-key ceiling)
+  : ${TW_CORES:=8}             # cores to show (0=all)
+  : ${TW_TEMP_WARN:=60}        # °C yellow threshold
+  : ${TW_TEMP_HOT:=75}         # °C orange threshold
+  : ${TW_TEMP_CRIT:=85}        # °C red threshold (also temp bar max)
+  : ${TW_CPU_MAX_MHZ:=5400}    # CPU freq bar ceiling
+  : ${TW_GPU_MAX_MHZ:=0}    # GPU core clock bar ceiling (0 = auto from nvidia-smi)
+  : ${TW_MEM_MAX_MHZ:=9001}    # GPU mem clock bar ceiling
+  : ${TW_FAN_MAX_RPM:=5500}    # fan RPM bar ceiling
+  : ${TW_NO_NVIDIA:=0}         # set to 1 to disable all nvidia-smi calls
+
   # ── config assignments ───────────────────────────────────────────────────────
-  interval=${1:-${TW_INTERVAL:-0.5}}
-  INTERVAL_MIN_CS=$(( int(${TW_INTERVAL_MIN:-0.5} * 100) ))
-  INTERVAL_MAX_CS=$(( int(${TW_INTERVAL_MAX:-10}  * 100) ))
-  TOP_CORES=${TW_CORES:-8}
-  T_WARN=${TW_TEMP_WARN:-60}
-  T_HOT=${TW_TEMP_HOT:-75}
-  T_CRIT=${TW_TEMP_CRIT:-85}
+  interval=${1:-${TW_INTERVAL}}
+  INTERVAL_MIN_CS=$(( int(TW_INTERVAL_MIN * 100) ))
+  INTERVAL_MAX_CS=$(( int(TW_INTERVAL_MAX * 100) ))
+  TOP_CORES=${TW_CORES}
+  T_WARN=${TW_TEMP_WARN}
+  T_HOT=${TW_TEMP_HOT}
+  T_CRIT=${TW_TEMP_CRIT}
   T_MAX=$(( T_CRIT + 15 ))   # temp bar scale: crit+15 = 100%
-  CPU_MAX=${TW_CPU_MAX_MHZ:-5400}
-  GPU_MAX_DEF=${TW_GPU_MAX_MHZ:-2175}
-  MEM_MAX=${TW_MEM_MAX_MHZ:-9500}
-  FAN_MAX=${TW_FAN_MAX_RPM:-5500}
-  NO_NVIDIA=${TW_NO_NVIDIA:-0}
+  CPU_MAX=${TW_CPU_MAX_MHZ}
+  GPU_MAX_DEF=${TW_GPU_MAX_MHZ}
+  MEM_MAX=${TW_MEM_MAX_MHZ}
+  FAN_MAX=${TW_FAN_MAX_RPM}
+  NO_NVIDIA=${TW_NO_NVIDIA}
   SHOW_CORES=1
   SHOW_NVIDIA=1
   SHOW_HELP=0
@@ -298,13 +312,15 @@ syswatch() {
   }
 
   _nvidia_max() {
+    # Non-zero TW_GPU_MAX_MHZ = use it as the bar ceiling; 0 = auto from nvidia-smi
+    (( GPU_MAX_DEF > 0 )) && { printf '%d' "${GPU_MAX_DEF}"; return; }
     if (( NO_NVIDIA )) || ! command -v nvidia-smi &>/dev/null; then
       printf '%d' "${GPU_MAX_DEF}"
       return
     fi
     local v
     v=$(nvidia-smi --query-gpu=clocks.max.gr --format=csv,noheader,nounits 2>/dev/null | tr -d ' ')
-    printf '%d' "${v:-${GPU_MAX_DEF}}"
+    printf '%d' "${v:-1000}"
   }
 
   # per-core lines: "mhz cpu coreid temp" sorted desc by mhz
