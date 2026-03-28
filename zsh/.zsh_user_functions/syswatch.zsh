@@ -292,6 +292,7 @@ syswatch() {
     fi
     printf '%s' "${raw}" | awk -F', ' '{
       gsub(/ /, "", $5)
+      gsub(/[^0-9]/, "", $3)
       printf "%d %d %d %.0f %s %d %d %d", $1,$2,$3,$4,$5,$6,$7,$8
     }'
   }
