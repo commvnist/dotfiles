@@ -48,12 +48,13 @@ tempwatch() {
   local prof pwrsrc
   local bpct bwatt bst
   local nvc nvm nvu nvp nvps nvvu nvvt nvt
+  local ram_used ram_total
 
   # Render temporaries
   local _buf disp_int ts bcol clabel di
   local line _mhz _rest _cpu _phys _temp cf ct2 ctype
   local sdata
-  local ei v el vp vc ec_raw
+  local v vp vc
 
   # ── config assignments ───────────────────────────────────────────────────────
   interval=${1:-${TW_INTERVAL:-0.5}}
@@ -407,6 +408,12 @@ tempwatch() {
       nvc=${nv[1]}; nvm=${nv[2]}; nvu=${nv[3]}; nvp=${nv[4]}
       nvps=${nv[5]}; nvvu=${nv[6]}; nvvt=${nv[7]}; nvt=${nv[8]}
 
+      read ram_used ram_total <<< $(awk '
+        /^MemTotal/     { t=$2 }
+        /^MemAvailable/ { a=$2 }
+        END { printf "%d %d", int((t-a)/1024), int(t/1024) }
+      ' /proc/meminfo)
+
       cl=()
       (( SHOW_CORES )) && cl=("${(@f)$(_core_lines ${TOP_CORES})}")
 
@@ -503,26 +510,15 @@ tempwatch() {
       fi
       [[ ${wifi:-0} -gt 0 ]] && _p "   ${LBL}wifi${R} $(_tc ${wifi})${wifi}°C${R}"
       _pn ""
-      _pn "  ${LBL}fan1${R} ${BLU}${fan1} RPM${R}   ${LBL}fan2${R} ${BLU}${fan2} RPM${R}"
-
-      # ── EC thermal strip ────────────────────────────────────────────────────
-      _sec "EC thermal (raw)"
-      ec_raw=$(< /proc/acpi/ibm/thermal 2>/dev/null) || ec_raw=''
-      if [[ -n "${ec_raw}" ]]; then
-        ecv=( ${(z)ec_raw} )
-        ecl=('cpu' 'gpu' 't3' '' 't5' 't6' 't7' '')
-        ei=1
-        for v in "${ecv[@]}"; do
-          [[ "${v}" =~ ^[0-9]+$ ]] || { (( ei++ )); continue }
-          el=${ecl[${ei}]:-''}
-          if [[ -n "${el}" ]] && (( v > 0 && v < 200 )); then
-            _p "  ${DIM}${el}${R} $(_tc ${v})${v}°C${R}"
-          fi
-          (( ei++ ))
-        done
-        _pn ""
+      if (( ram_total > 0 )); then
+        local rp rc
+        rp=$(( ram_used * 100 / ram_total ))
+        rc=$(_pc "${rp}")
+        _p  "  ${LBL}${(r:18:):-ram}${R} "
+        _bar "${ram_used}" "${ram_total}" "${rc}"
+        _pn " ${rc}${ram_used}/${ram_total} MiB${R}"
       fi
-      _pn ""
+      _pn "  ${LBL}fan1${R} ${BLU}${fan1} RPM${R}   ${LBL}fan2${R} ${BLU}${fan2} RPM${R}"
 
       # ── atomic flush — clear screen then write complete frame ────────────────
       tput cup 0 0
