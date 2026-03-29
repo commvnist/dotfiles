@@ -41,6 +41,9 @@ source /usr/share/zsh/plugins/zsh-autosuggestions/zsh-autosuggestions.plugin.zsh
 # zsh-autopair
 source /usr/share/zsh/plugins/zsh-autopair/zsh-autopair.plugin.zsh
 
+# Ctrl+F: accept autosuggestion
+bindkey '^F' autosuggest-accept
+
 # zsh-syntax-highlighting
 source /usr/share/zsh/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.plugin.zsh
 
