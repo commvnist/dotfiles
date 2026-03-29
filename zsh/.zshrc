@@ -1,5 +1,16 @@
-# Starship
+# editor
+export EDITOR=vim
+
+# starship
 eval "$(starship init zsh)"
+
+# word jumping
+bindkey "^[[1;5C" forward-word
+bindkey "^[[1;5D" backward-word
+
+# For some others (tmux alters sequences)
+bindkey "^[Od" backward-word
+bindkey "^[Oc" forward-word
 
 # bat
 alias cat="bat"
@@ -41,3 +52,6 @@ source <(fzf --zsh)
 
 # syswatch
 source ~/.zsh_user_functions/syswatch.zsh
+
+# ollama-cuda
+source /etc/profile
