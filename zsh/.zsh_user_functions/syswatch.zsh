@@ -564,7 +564,7 @@ syswatch() {
             _pn " ${vc}${nvvu}/${nvvt} MiB${R}"
           fi
           _pn ""
-          _pn "  ${LBL}pstate${R} ${ACC}${nvps}${R}   ${LBL}gpu pwr${R} $(_wc ${nvp})${nvp}W${R}"
+          _pn "  ${LBL}pstate${R} ${ACC}${nvps}${R}   ${LBL}gpu pwr${R} $(_wc ${nvp})${(l:3:)nvp}W${R}"
         fi
       fi
 
