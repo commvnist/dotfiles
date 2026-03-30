@@ -16,10 +16,11 @@
 #   TW_MEM_MAX_MHZ=9001      GPU mem clock bar ceiling  (0 = auto from nvidia-smi) *
 #   TW_FAN_MAX_RPM=5500      fan RPM bar ceiling
 #   TW_NO_NVIDIA=1           disable all nvidia-smi calls
+#   TW_TOP_PROCS=5           top processes to show per section (0 = hide)
 #
 # * setting to 0 queries nvidia-smi at startup for the real max clock
 #
-# Keys:  q quit  +/- speed  c cores  n gpu  h help
+# Keys:  q quit  +/- speed  c cores  n gpu  p procs  h help
 # ──────────────────────────────────────────────────────────────────────────────
 
 syswatch() {
@@ -30,10 +31,10 @@ syswatch() {
   # Config
   local interval
   local INTERVAL_MIN_CS INTERVAL_MAX_CS
-  local TOP_CORES T_WARN T_HOT T_CRIT T_MAX
+  local TOP_CORES TOP_PROCS T_WARN T_HOT T_CRIT T_MAX
   local CPU_MAX GPU_MAX_DEF MEM_MAX FAN_MAX
   local NO_NVIDIA
-  local SHOW_CORES SHOW_NVIDIA SHOW_HELP
+  local SHOW_CORES SHOW_NVIDIA SHOW_HELP SHOW_PROCS
 
   # Colors
   local R DIM DIMMER LBL ACC TTL SEC GRN YLW ORG RED BLU
@@ -45,7 +46,7 @@ syswatch() {
   # Per-frame data
   local now_cs key
   local cpu_pkg cpu_cmax gpu_ec nvme wifi fan1 fan2
-  local -a fs ps bi nv cl ram_dimms
+  local -a fs ps bi nv cl ram_dimms gpu_procs cpu_procs mem_procs
   local fmin fmax favg ncpu nact
   local gov epp turbo hwpb pmin pmax
   local prof pwrsrc
@@ -57,6 +58,7 @@ syswatch() {
   # Render temporaries
   local _buf disp_int ts bcol clabel di
   local line _mhz _rest _cpu _phys _temp cf ct2 ctype
+  local _pct _pct_i _name _mem _col_proc
   local sdata
   local v vp vc
   local rp rc
@@ -74,6 +76,7 @@ syswatch() {
   : ${TW_MEM_MAX_MHZ:=0}       # GPU mem clock bar ceiling  (0 = auto from nvidia-smi) *
   : ${TW_FAN_MAX_RPM:=5500}    # fan RPM bar ceiling
   : ${TW_NO_NVIDIA:=0}         # set to 1 to disable all nvidia-smi calls
+  : ${TW_TOP_PROCS:=5}         # top processes per section (0 = hide)
 
   # ── config assignments ───────────────────────────────────────────────────────
   interval=${1:-${TW_INTERVAL}}
@@ -89,9 +92,11 @@ syswatch() {
   MEM_MAX=${TW_MEM_MAX_MHZ}
   FAN_MAX=${TW_FAN_MAX_RPM}
   NO_NVIDIA=${TW_NO_NVIDIA}
+  TOP_PROCS=${TW_TOP_PROCS}
   SHOW_CORES=1
   SHOW_NVIDIA=1
   SHOW_HELP=0
+  SHOW_PROCS=1
   last_cs=0
 
   # ── colors ($'...' = real ESC bytes, never backslash-e in double quotes) ─────
@@ -239,8 +244,8 @@ syswatch() {
       /^spd5118/               { b=1; next }
       /^[a-zA-Z].*-[0-9]/     { b=0 }
       b && /temp1:/ {
-        sub(/.*\+/, ""); sub(/\..*/, "")
-        printf "%d\n", $0+0
+        match($0, /\+([0-9]+\.[0-9]+)/, r)
+        printf "%d\n", r[1]+0
       }'
   }
 
@@ -335,6 +340,52 @@ syswatch() {
     printf '%d' "${v:-9001}"
   }
 
+  _nvidia_procs() {  # returns lines: "mem_mib name" sorted desc by mem
+    local limit=${1:-5}
+    (( NO_NVIDIA )) || ! command -v nvidia-smi &>/dev/null && return
+    nvidia-smi 2>/dev/null | awk -v lim="${limit}" '
+      BEGIN { FS="|"; count=0 }
+      /^\| *[0-9]+ +[A-Z0-9\/N]+.*MiB/ {
+        line = $2; gsub(/^ +| +$/, "", line)
+        n = split(line, f, / +/)
+        mem_str = f[n]; gsub(/MiB/, "", mem_str); mem = mem_str + 0
+        if (mem <= 0) next
+        name = f[6]
+        for (i = 7; i < n; i++) name = name " " f[i]
+        sub(/.*\//, "", name)
+        if (length(name) > 20) name = substr(name, 1, 20)
+        lines[count] = mem " " name; count++
+      }
+      END {
+        for (i = 0; i < count-1; i++)
+          for (j = i+1; j < count; j++) {
+            split(lines[i], a); split(lines[j], b)
+            if (b[1]+0 > a[1]+0) { tmp=lines[i]; lines[i]=lines[j]; lines[j]=tmp }
+          }
+        for (i = 0; i < count && i < lim; i++) print lines[i]
+      }'
+  }
+
+  _cpu_top_procs() {  # returns lines: "pct name" sorted desc by cpu%
+    local limit=${1:-5}
+    ps -eo pcpu,etimes,comm --no-headers --sort=-pcpu 2>/dev/null | \
+      awk -v lim="${limit}" '
+        $2+0 < 5  { next }
+        $1+0 <= 0 { next }
+        ++count <= lim { printf "%.1f %s\n", $1+0, $3 }
+      '
+  }
+
+  _mem_top_procs() {  # returns lines: "pct rss_mib name" sorted desc by mem%
+    local limit=${1:-5}
+    ps -eo pmem,rss,etimes,comm --no-headers --sort=-pmem 2>/dev/null | \
+      awk -v lim="${limit}" '
+        $3+0 < 5  { next }
+        $1+0 <= 0 { next }
+        ++count <= lim { printf "%.1f %d %s\n", $1+0, int($2/1024), $4 }
+      '
+  }
+
   # per-core lines: "mhz cpu coreid temp" sorted desc by mhz
   # coretemp "Core N" == /proc/cpuinfo "core id" N (direct match, no topology math)
   _core_lines() {
@@ -418,6 +469,7 @@ syswatch() {
       -)   (( interval_cs += 50 )); (( interval_cs > INTERVAL_MAX_CS )) && interval_cs=${INTERVAL_MAX_CS} ;;
       c)   (( SHOW_CORES  ^= 1 )) ;;
       n)   (( SHOW_NVIDIA ^= 1 )) ;;
+      p)   (( SHOW_PROCS  ^= 1 )) ;;
       h)   (( SHOW_HELP   ^= 1 )) ;;
     esac
 
@@ -478,17 +530,25 @@ syswatch() {
       cl=()
       (( SHOW_CORES )) && cl=("${(@f)$(_core_lines ${TOP_CORES} "${sdata}")}")
 
+      gpu_procs=(); cpu_procs=(); mem_procs=()
+      if (( SHOW_PROCS && TOP_PROCS > 0 )); then
+        (( ! NO_NVIDIA )) && command -v nvidia-smi &>/dev/null && \
+          gpu_procs=("${(@f)$(_nvidia_procs ${TOP_PROCS})}")
+        cpu_procs=("${(@f)$(_cpu_top_procs ${TOP_PROCS})}")
+        mem_procs=("${(@f)$(_mem_top_procs ${TOP_PROCS})}")
+      fi
+
       # ── build frame buffer ───────────────────────────────────────────────────
       _buf=''
       printf -v disp_int '%.1f' "$(( interval_cs / 100.0 ))"
       ts=$(date '+%H:%M:%S')
 
       _pn ""
-      _p  "  ${TTL}syswatch${R}  ${DIM}${ts}  ${disp_int}s  +/- speed  c cores  n gpu  q quit${R}"
+      _p  "  ${TTL}syswatch${R}  ${DIM}${ts}  ${disp_int}s  +/- speed  c cores  n gpu  p procs  q quit${R}"
       if (( SHOW_HELP )); then
         _pn ""
         _pn "  ${DIM}TW_CORES=N  TW_INTERVAL=N  TW_INTERVAL_MIN=N  TW_INTERVAL_MAX=N${R}"
-        _pn "  ${DIM}TW_TEMP_WARN=N  TW_TEMP_HOT=N  TW_TEMP_CRIT=N  TW_NO_NVIDIA=1${R}"
+        _pn "  ${DIM}TW_TEMP_WARN=N  TW_TEMP_HOT=N  TW_TEMP_CRIT=N  TW_NO_NVIDIA=1  TW_TOP_PROCS=N${R}"
       fi
       _pn ""
 
@@ -508,6 +568,20 @@ syswatch() {
       _frow "freq avg"      "${favg:-0}"
       _pn ""
       _pn "  ${LBL}gov${R} ${ACC}${gov}${R}   ${LBL}epp${R} ${ACC}${epp}${R}   ${LBL}turbo${R} ${ACC}${turbo}${R}   ${LBL}hwp boost${R} ${ACC}${hwpb}${R}   ${LBL}cpu pwr${R} $(_wc ${rapl_pkg_w})${(l:3:)rapl_pkg_w}W${R}"
+
+      if (( SHOW_PROCS )) && (( ${#cpu_procs[@]} > 0 )); then
+        _pn ""
+        _pn "  ${SEC}top cpu processes${R}${DIM}  (cpu%)${R}"
+        for line in "${cpu_procs[@]}"; do
+          [[ -z "${line}" ]] && continue
+          _pct=${line%% *}; _name=${line#* }
+          _pct_i=${_pct%%.*}
+          _col_proc=$(_pc "${_pct_i}")
+          _p  "  ${LBL}${(r:18:)_name}${R} "
+          _bar "${_pct_i}" 100 "${_col_proc}"
+          _pn " ${_col_proc}${(l:5:)_pct}%${R}"
+        done
+      fi
 
       # ── per-core ────────────────────────────────────────────────────────────
       if (( SHOW_CORES )) && (( ${#cl[@]} > 0 )); then
@@ -556,21 +630,25 @@ syswatch() {
           fi
           _pn ""
           _pn "  ${LBL}pstate${R} ${ACC}${nvps}${R}   ${LBL}gpu pwr${R} $(_wc ${nvp})${(l:3:)nvp}W${R}"
+
+          if (( SHOW_PROCS )) && (( ${#gpu_procs[@]} > 0 )); then
+            _pn ""
+            _pn "  ${SEC}top gpu processes${R}${DIM}  (vram)${R}"
+            for line in "${gpu_procs[@]}"; do
+              [[ -z "${line}" ]] && continue
+              _mem=${line%% *}; _name=${line#* }
+              vp=$(( nvvt > 0 ? _mem * 100 / nvvt : 0 ))
+              vc=$(_pc "${vp}")
+              _p  "  ${LBL}${(r:18:)_name}${R} "
+              _bar "${_mem}" "$(( nvvt > 0 ? nvvt : 1 ))" "${vc}"
+              _pn " ${vc}${(l:5:)_mem} MiB${R}"
+            done
+          fi
         fi
       fi
 
-      # ── Storage / Memory / Fans — plain text, no bars ───────────────────────
-      _sec "Storage / Memory / Network / Fans"
-      [[ ${nvme:-0} -gt 0 ]] && _p "  ${LBL}nvme${R} $(_tc ${nvme})${nvme}°C${R}"
-      if (( ${#ram_dimms[@]} > 0 )); then
-        di=1
-        for v in "${ram_dimms[@]}"; do
-          (( v > 0 )) && _p "   ${LBL}dimm${di}${R} $(_tc ${v})${v}°C${R}"
-          (( di++ ))
-        done
-      fi
-      [[ ${wifi:-0} -gt 0 ]] && _p "   ${LBL}wifi${R} $(_tc ${wifi})${wifi}°C${R}"
-      _pn ""
+      # ── Memory ──────────────────────────────────────────────────────────────
+      _sec "Memory"
       if (( ram_total > 0 )); then
         rp=$(( ram_used * 100 / ram_total ))
         rc=$(_pc "${rp}")
@@ -578,6 +656,34 @@ syswatch() {
         _bar "${ram_used}" "${ram_total}" "${rc}"
         _pn " ${rc}${ram_used}/${ram_total} MiB${R}"
       fi
+      if (( ${#ram_dimms[@]} > 0 )); then
+        di=1
+        for v in "${ram_dimms[@]}"; do
+          (( v > 0 )) && _p "  ${LBL}dimm${di}${R} $(_tc ${v})${v}°C${R}"
+          (( di++ ))
+        done
+        _pn ""
+      fi
+
+      if (( SHOW_PROCS )) && (( ${#mem_procs[@]} > 0 )); then
+        _pn ""
+        _pn "  ${SEC}top mem processes${R}${DIM}  (mem%)${R}"
+        for line in "${mem_procs[@]}"; do
+          [[ -z "${line}" ]] && continue
+          _pct=${line%% *};  _rest=${line#* }
+          _mem=${_rest%% *}; _name=${_rest#* }
+          _pct_i=${_pct%%.*}
+          _col_proc=$(_pc "${_pct_i}")
+          _p  "  ${LBL}${(r:18:)_name}${R} "
+          _bar "${_pct_i}" 100 "${_col_proc}"
+          _pn " ${_col_proc}${(l:5:)_pct}%${R}${DIM} ${_mem} MiB${R}"
+        done
+      fi
+
+      # ── Storage / Network / Fans ─────────────────────────────────────────────
+      _sec "Storage / Network / Fans"
+      [[ ${nvme:-0} -gt 0 ]] && _pn "  ${LBL}nvme${R} $(_tc ${nvme})${nvme}°C${R}"
+      [[ ${wifi:-0} -gt 0 ]] && _pn "  ${LBL}wifi${R} $(_tc ${wifi})${wifi}°C${R}"
       _pn "  ${LBL}fan1${R} ${BLU}${(l:4:)fan1} RPM${R}   ${LBL}fan2${R} ${BLU}${(l:4:)fan2} RPM${R}"
 
       # ── atomic flush — overwrite in place, then erase any leftover lines ───────
