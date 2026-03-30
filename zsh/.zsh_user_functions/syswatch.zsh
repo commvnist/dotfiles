@@ -186,7 +186,7 @@ syswatch() {
     col=$(_tc "${temp}")
     _p  "  ${LBL}${(r:18:)label}${R} "
     _bar "${temp}" "${T_MAX}" "${col}"
-    _pn " ${col}${(l:3:)temp}°C${R}"
+    _pn " ${col}${(l:5:)temp} °C${R}"
   }
 
   _frow() {  # freq bar row: _frow <label> <mhz> [max]
@@ -204,7 +204,7 @@ syswatch() {
     col=$(_pc "${pct}")
     _p  "  ${LBL}${(r:18:)label}${R} "
     _bar "${pct}" 100 "${col}"
-    _pn " ${col}${(l:3:)pct}%${R}"
+    _pn " ${col}${(l:5:)pct} %${R}"
   }
 
   # ── data collectors ──────────────────────────────────────────────────────────
@@ -353,7 +353,7 @@ syswatch() {
         name = f[6]
         for (i = 7; i < n; i++) name = name " " f[i]
         sub(/.*\//, "", name)
-        if (length(name) > 20) name = substr(name, 1, 20)
+        if (length(name) > 18) name = substr(name, 1, 18)
         lines[count] = mem " " name; count++
       }
       END {
@@ -372,7 +372,7 @@ syswatch() {
       awk -v lim="${limit}" '
         $2+0 < 5  { next }
         $1+0 <= 0 { next }
-        ++count <= lim { printf "%.1f %s\n", $1+0, $3 }
+        ++count <= lim { name = substr($3, 1, 18); printf "%.1f %s\n", $1+0, name }
       '
   }
 
@@ -382,7 +382,7 @@ syswatch() {
       awk -v lim="${limit}" '
         $3+0 < 5  { next }
         $1+0 <= 0 { next }
-        ++count <= lim { printf "%.1f %d %s\n", $1+0, int($2/1024), $4 }
+        ++count <= lim { name = substr($4, 1, 18); printf "%.1f %d %s\n", $1+0, int($2/1024), name }
       '
   }
 
@@ -569,25 +569,12 @@ syswatch() {
       _pn ""
       _pn "  ${LBL}gov${R} ${ACC}${gov}${R}   ${LBL}epp${R} ${ACC}${epp}${R}   ${LBL}turbo${R} ${ACC}${turbo}${R}   ${LBL}hwp boost${R} ${ACC}${hwpb}${R}   ${LBL}cpu pwr${R} $(_wc ${rapl_pkg_w})${(l:3:)rapl_pkg_w}W${R}"
 
-      if (( SHOW_PROCS )) && (( ${#cpu_procs[@]} > 0 )); then
-        _pn ""
-        _pn "  ${SEC}top cpu processes${R}${DIM}  (cpu%)${R}"
-        for line in "${cpu_procs[@]}"; do
-          [[ -z "${line}" ]] && continue
-          _pct=${line%% *}; _name=${line#* }
-          _pct_i=${_pct%%.*}
-          _col_proc=$(_pc "${_pct_i}")
-          _p  "  ${LBL}${(r:18:)_name}${R} "
-          _bar "${_pct_i}" 100 "${_col_proc}"
-          _pn " ${_col_proc}${(l:5:)_pct}%${R}"
-        done
-      fi
-
       # ── per-core ────────────────────────────────────────────────────────────
       if (( SHOW_CORES )) && (( ${#cl[@]} > 0 )); then
         clabel="all ${ncpu} cores"
         (( TOP_CORES > 0 )) && clabel="top ${TOP_CORES} of ${ncpu} cores"
-        _sec "${clabel}"
+        _pn ""
+        _pn "  ${SEC}${clabel}${R}"
         for line in "${cl[@]}"; do
           [[ -z "${line}" ]] && continue
           _mhz=${line%% *};    _rest=${line#* }
@@ -598,11 +585,26 @@ syswatch() {
           ct2=$(_tc "${_temp:-0}")
           # P-cores: core id < 32   E-cores: core id >= 32
           ctype='E'; (( _phys < 32 )) && ctype='P'
-          _p "  ${DIM}c${(l:2::0:)_cpu}[${ctype}]${R} "
+          _name="c${(l:2::0:)_cpu}[${ctype}]"
+          _p "  ${DIM}${(r:18:)_name}${R} "
           _bar "${_mhz}" "${CPU_MAX}" "${cf}"
-          _p " ${cf}${(l:4:)_mhz}MHz${R}"
-          (( _temp > 0 )) && _p "  ${ct2}${(l:2:)_temp}°${R}"
+          _p " ${cf}${(l:5:)_mhz} MHz${R}"
+          (( _temp > 0 )) && _p "  ${ct2}${(l:5:)_temp} °C${R}"
           _pn ""
+        done
+      fi
+
+      if (( SHOW_PROCS )) && (( ${#cpu_procs[@]} > 0 )); then
+        _pn ""
+        _pn "  ${SEC}top cpu processes${R}${DIM}  (cpu%)${R}"
+        for line in "${cpu_procs[@]}"; do
+          [[ -z "${line}" ]] && continue
+          _pct=${line%% *}; _name=${line#* }
+          _pct_i=${_pct%%.*}
+          _col_proc=$(_pc "${_pct_i}")
+          _p  "  ${LBL}${(r:18:)_name}${R} "
+          _bar "${_pct_i}" 100 "${_col_proc}"
+          _pn " ${_col_proc}${(l:5:)_pct} %${R}"
         done
       fi
 
@@ -624,24 +626,25 @@ syswatch() {
           if (( nvvt > 0 )); then
             vp=$(( nvvu * 100 / nvvt ))
             vc=$(_pc "${vp}")
-            _p  "  ${LBL}${(r:18:):-vram}${R} "
+            _name=" ${nvvt} MiB"
+            _p  "  ${LBL}vram${R}${DIM}${(r:14:)_name}${R} "
             _bar "${nvvu}" "${nvvt}" "${vc}"
-            _pn " ${vc}${nvvu}/${nvvt} MiB${R}"
+            _pn " ${vc}${(l:5:)nvvu} MiB${R}"
           fi
           _pn ""
           _pn "  ${LBL}pstate${R} ${ACC}${nvps}${R}   ${LBL}gpu pwr${R} $(_wc ${nvp})${(l:3:)nvp}W${R}"
 
           if (( SHOW_PROCS )) && (( ${#gpu_procs[@]} > 0 )); then
             _pn ""
-            _pn "  ${SEC}top gpu processes${R}${DIM}  (vram)${R}"
+            _pn "  ${SEC}top gpu processes${R}${DIM}  (vram%)${R}"
             for line in "${gpu_procs[@]}"; do
               [[ -z "${line}" ]] && continue
               _mem=${line%% *}; _name=${line#* }
               vp=$(( nvvt > 0 ? _mem * 100 / nvvt : 0 ))
               vc=$(_pc "${vp}")
               _p  "  ${LBL}${(r:18:)_name}${R} "
-              _bar "${_mem}" "$(( nvvt > 0 ? nvvt : 1 ))" "${vc}"
-              _pn " ${vc}${(l:5:)_mem} MiB${R}"
+              _bar "${vp}" 100 "${vc}"
+              _pn " ${vc}${(l:5:)vp} %${R}${DIM}  ${(l:5:)_mem} MiB${R}"
             done
           fi
         fi
@@ -652,14 +655,19 @@ syswatch() {
       if (( ram_total > 0 )); then
         rp=$(( ram_used * 100 / ram_total ))
         rc=$(_pc "${rp}")
-        _p  "  ${LBL}${(r:18:):-ram}${R} "
+        _name=" ${ram_total} MiB"
+        _p  "  ${LBL}ram${R}${DIM}${(r:15:)_name}${R} "
         _bar "${ram_used}" "${ram_total}" "${rc}"
-        _pn " ${rc}${ram_used}/${ram_total} MiB${R}"
+        _pn " ${rc}${(l:5:)ram_used} MiB${R}"
       fi
       if (( ${#ram_dimms[@]} > 0 )); then
-        di=1
+        di=1; _pct_i=1
         for v in "${ram_dimms[@]}"; do
-          (( v > 0 )) && _p "  ${LBL}dimm${di}${R} $(_tc ${v})${v}°C${R}"
+          if (( v > 0 )); then
+            (( _pct_i )) && _p "  " || _p "   "
+            _pct_i=0
+            _p "${LBL}dimm${di}${R} $(_tc ${v})${(l:3:)v}°C${R}"
+          fi
           (( di++ ))
         done
         _pn ""
@@ -676,7 +684,7 @@ syswatch() {
           _col_proc=$(_pc "${_pct_i}")
           _p  "  ${LBL}${(r:18:)_name}${R} "
           _bar "${_pct_i}" 100 "${_col_proc}"
-          _pn " ${_col_proc}${(l:5:)_pct}%${R}${DIM} ${_mem} MiB${R}"
+          _pn " ${_col_proc}${(l:5:)_pct} %${R}${DIM}  ${(l:5:)_mem} MiB${R}"
         done
       fi
 
