@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
-"""Create an Obsidian movie entry from a TMDB URL."""
+"""Create an Obsidian movie entry from a TMDB URL or interactive search."""
 
 import sys
 import re
 import os
 import urllib.request
+import urllib.parse
 from datetime import date
+
+MAX_SEARCH_RESULTS = 10
 
 
 def fetch_html(url):
@@ -16,6 +19,106 @@ def fetch_html(url):
     })
     with urllib.request.urlopen(req, timeout=15) as resp:
         return resp.read().decode('utf-8', errors='replace')
+
+
+def search_tmdb(query):
+    """Search TMDB and return a list of (title, year, description, url) tuples."""
+    encoded = urllib.parse.quote(query)
+    search_url = f'https://www.themoviedb.org/search?query={encoded}'
+    print(f'Searching {search_url} ...', file=sys.stderr)
+    html = fetch_html(search_url)
+
+    # Extract the movie results section
+    movie_sec_match = re.search(
+        r'<div class="search_results movie[^"]*">\s*<div class="results flex">(.*?)<div class="pagination_wrapper">',
+        html, re.DOTALL
+    )
+    if not movie_sec_match:
+        return []
+
+    section = movie_sec_match.group(1)
+
+    results = []
+    # Split on card div boundaries (ids are hex strings assigned by TMDB)
+    card_chunks = re.split(r'(?=<div id="[0-9a-f]+" class="card v4 tight")', section)
+
+    for chunk in card_chunks:
+        if not chunk.strip():
+            continue
+
+        href_match = re.search(r'href="(/movie/[^"]+)"', chunk)
+        if not href_match:
+            continue
+        href = href_match.group(1)
+        full_url = f'https://www.themoviedb.org{href}'
+
+        title_match = re.search(r'<h2[^>]*>\s*<span>([^<]+)</span>', chunk)
+        title = title_match.group(1).strip() if title_match else 'Unknown'
+
+        year_match = re.search(r'<span class="release_date">[^<]*?(\d{4})[^<]*</span>', chunk)
+        year = year_match.group(1) if year_match else ''
+
+        desc_match = re.search(r'<div class="overview">\s*<p>(.*?)</p>', chunk, re.DOTALL)
+        description = re.sub(r'<[^>]+>', '', desc_match.group(1)).strip() if desc_match else '(No description)'
+
+        results.append((title, year, description, full_url))
+        if len(results) >= MAX_SEARCH_RESULTS:
+            break
+
+    return results
+
+
+def prompt_search():
+    """Interactive search and selection. Returns the selected TMDB movie URL."""
+    query = input('Search TMDB: ').strip()
+    if not query:
+        print('No query entered.', file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        results = search_tmdb(query)
+    except Exception as e:
+        print(f'Error searching: {e}', file=sys.stderr)
+        sys.exit(1)
+
+    if not results:
+        print('No results found.', file=sys.stderr)
+        sys.exit(1)
+
+    print()
+    for i, (title, year, desc, _url) in enumerate(results, 1):
+        label = f'{title} ({year})' if year else title
+        short_desc = (desc[:120] + '...') if len(desc) > 120 else desc
+        print(f'{i}. {label}')
+        print(f'   {short_desc}')
+        print()
+
+    while True:
+        choice = input(f'Select a movie (1-{len(results)}): ').strip()
+        try:
+            idx = int(choice) - 1
+            if 0 <= idx < len(results):
+                break
+        except ValueError:
+            pass
+        print(f'Please enter a number between 1 and {len(results)}.')
+
+    return results[idx][3]
+
+
+def prompt_rating():
+    return input('Rating (e.g. 8/10, or leave blank): ').strip()
+
+
+def prompt_watched_date():
+    val = input('When did you watch it? (YYYY/MM/DD, blank = today, "no" = leave blank): ').strip()
+    if val == '':
+        return date.today().strftime('%Y-%m-%d')
+    elif val.lower() == 'no':
+        return ''
+    else:
+        # Accept YYYY/MM/DD and normalise to YYYY-MM-DD
+        return val.replace('/', '-')
 
 
 def parse_tmdb(html):
@@ -77,12 +180,11 @@ def parse_tmdb(html):
     return title, year, genres, directors, cast
 
 
-def build_entry(title, year, genres, directors, cast):
-    today = date.today().strftime('%Y-%m-%d')
+def build_entry(title, year, genres, directors, cast, rating='', finished=''):
     lines = [
         '---',
         f'year: {year}',
-        f'finished: {today}',
+        f'finished: {finished}',
         'genre:',
     ]
     for g in genres:
@@ -94,7 +196,7 @@ def build_entry(title, year, genres, directors, cast):
     for c in cast:
         lines.append(f'  - {c}')
     lines += [
-        'rating: ',
+        f'rating: {rating}',
         'tags:',
         '  - movie',
         '---',
@@ -112,11 +214,16 @@ MOVIES_DIR = os.environ.get('OBSIDIAN_MOVIES_DIR', os.path.expanduser('~/Documen
 
 
 def main():
-    if len(sys.argv) < 2:
-        print('Usage: obsidian_movie_entry <tmdb_url>', file=sys.stderr)
-        sys.exit(1)
+    if len(sys.argv) < 2 or not sys.argv[1].strip():
+        # Search mode: no URL provided
+        url = prompt_search()
+        rating = prompt_rating()
+        finished = prompt_watched_date()
+    else:
+        url = sys.argv[1]
+        rating = ''
+        finished = date.today().strftime('%Y-%m-%d')
 
-    url = sys.argv[1]
     print(f'Fetching {url} ...', file=sys.stderr)
 
     try:
@@ -135,7 +242,7 @@ def main():
     if not cast:
         print('Warning: cast section not found — page structure may have changed.', file=sys.stderr)
 
-    content = build_entry(title, year, genres, directors, cast)
+    content = build_entry(title, year, genres, directors, cast, rating, finished)
 
     filename = sanitize_filename(title)
     filepath = os.path.join(MOVIES_DIR, f'{filename}.md')

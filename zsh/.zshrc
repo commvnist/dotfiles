@@ -52,10 +52,10 @@ bindkey '^F' autosuggest-accept
 source <(fzf --zsh)
 
 # syswatch
-source ~/.zsh_user_functions/syswatch.zsh
+source ~/.scripts/syswatch.zsh
 
 # obsidian movie entry
-source ~/.zsh_user_functions/obsidian_movie_entry.zsh
+source ~/.scripts/obsidian_movie_entry.zsh
 
 # ollama-cuda
 source /etc/profile
