@@ -17,11 +17,40 @@ alias cat="bat"
 
 # ls
 alias ls='ls --color=auto --group-directories-first'
-alias l='ls -lh'
-alias la='ls -lAh'
-alias lt='ls -lht'
-alias lS='ls -lhS'
-alias l.='ls -lhd .*'
+alias l='ls -CF'
+alias la='ls -A'
+alias ll='ls -alFh'
+alias lh='ls -lhF'
+alias lt='ls -alht'
+alias lS='ls -alhS'
+alias lr='ls -alhR'
+alias l.='ls -ld .*'
+
+# git
+alias ga='git add'
+alias gaa='git add --all'
+alias gau='git add -u'
+alias gb='git branch'
+alias gco='git checkout'
+alias gc='git commit'
+alias gca='git commit --amend'
+alias gcm='git commit -m'
+alias gd='git diff'
+alias gds='git diff --staged'
+alias gl='git log --oneline --graph --decorate --all'
+alias gp='git push'
+alias gpl='git pull --rebase'
+alias gs='git status -sb'
+alias gsw='git switch'
+
+gacp() {
+  local msg="$*"
+  [[ -n "$msg" ]] || {
+    print -u2 "usage: gacp <commit message>"
+    return 1
+  }
+  git add -u && git commit -m "$msg" && git push
+}
 
 # History
 export HISTFILE="$HOME/.zsh_history"
