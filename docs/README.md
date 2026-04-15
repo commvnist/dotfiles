@@ -1,8 +1,8 @@
 # Documentation
 
-This directory documents the dotfiles repository and its top-level package
-areas. The repository is designed for GNU Stow: package directories contain
-files laid out as they should appear under `$HOME`.
+This directory documents the dotfiles repository, its top-level package areas,
+and host-specific setup notes. The repository is designed for GNU Stow: package
+directories contain files laid out as they should appear under `$HOME`.
 
 ## Common Dependencies
 
@@ -42,8 +42,9 @@ Run a dry run before changing links:
 stow -n -v <package>
 ```
 
-## Package Docs
+## Documentation Areas
 
+- [arch](arch/README.md)
 - [gnome-extension-sources](gnome-extension-sources/README.md)
 - [gnome-extensions](gnome-extensions/README.md)
 - [kitty](kitty/README.md)
