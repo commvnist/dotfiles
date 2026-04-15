@@ -1,50 +1,47 @@
 # dotfiles
 
-## quirks
+Personal Linux dotfiles managed as GNU Stow packages.
 
-### syswatch
+Each top-level package directory mirrors paths relative to `$HOME`. For example,
+`kitty/.config/kitty/kitty.conf` becomes `~/.config/kitty/kitty.conf` after
+stowing the `kitty` package.
 
-A zsh function sourced via `.zshrc` — *probably* only works on a ThinkPad P16 Gen 2.
+## Install
 
-#### Dependencies
+Install the common tooling:
 
-| Package | Purpose |
-|---|---|
-| `nvidia-smi` (NVIDIA driver) | GPU clock, utilization, power, VRAM, and temp |
-
-#### Setup
-
-**1. Fix RAPL permissions (CPU power reporting)**
-
-`syswatch` reads Intel RAPL energy counters from `/sys/class/powercap/intel-rapl:0/energy_uj`.
-Those files are root-owned by default, so CPU package power stays unavailable unless the
-permissions are adjusted at boot.
-
-Use a `systemd-tmpfiles` rule to set the access mode and group on the sysfs node:
-
-```
-echo 'z /sys/class/powercap/intel-rapl:0/energy_uj 0440 root rapl -' | sudo tee /etc/tmpfiles.d/rapl.conf
-sudo systemd-tmpfiles --create /etc/tmpfiles.d/rapl.conf
+```sh
+sudo pacman -S --needed stow zsh kitty starship tmux vim python
 ```
 
-If the `rapl` group does not exist yet, create it and add your user before running `syswatch`.
-The rule is re-applied on boot, which is why this is preferred over an ad hoc `chmod` or udev rule.
-For example:
+Stow packages from the repository root:
 
-```
-sudo groupadd --system rapl
-sudo usermod -aG rapl "$USER"
-```
-
-Log out and back in after changing group membership.
-
-To revert:
-
-```
-sudo rm /etc/tmpfiles.d/rapl.conf
-sudo chmod 0400 /sys/class/powercap/intel-rapl:0/energy_uj
+```sh
+stow zsh
+stow kitty
+stow starship
+stow tmux
+stow vim
+stow scripts
+stow gnome-extensions
 ```
 
-**2. Source the function**
+Use `stow -n -v <package>` for a dry run before linking a package.
 
-The function is loaded automatically if `.zsh_user_functions/` is sourced in your `.zshrc`. Run `syswatch` to start.
+## Layout
+
+- `gnome-extensions`: stowable GNOME Shell extension runtime files.
+- `gnome-extension-sources`: source and build tooling for generated GNOME Shell
+  extensions.
+- `kitty`: Kitty terminal configuration.
+- `scripts`: user scripts and shell functions.
+- `starship`: Starship prompt configuration.
+- `tmux`: tmux configuration.
+- `vim`: Vim configuration.
+- `zsh`: zsh shell configuration.
+- `docs`: concise documentation for the repository and each package area.
+
+## Documentation
+
+Start with [docs/README.md](docs/README.md). Package-specific documentation is
+kept under `docs/<package>/`.
