@@ -31,6 +31,12 @@ class SearchResult:
 
 
 @dataclass(frozen=True)
+class SearchQuery:
+    text: str
+    year: str
+
+
+@dataclass(frozen=True)
 class MovieMetadata:
     title: str
     year: str
@@ -65,6 +71,25 @@ def fetch_html(url: str) -> str:
         return resp.read().decode("utf-8", errors="replace")
 
 
+def parse_search_query(query: str) -> SearchQuery:
+    """Parse simple interactive filters before sending the text query to TMDB."""
+    terms: list[str] = []
+    year = ""
+
+    for raw_part in query.split():
+        year_match = re.fullmatch(r"(?:y|year):(\d{4})", raw_part, re.IGNORECASE)
+        if year_match:
+            year = year_match.group(1)
+            continue
+        terms.append(raw_part)
+
+    text = " ".join(terms).strip()
+    if not text:
+        raise ValueError("search query must include movie title text")
+
+    return SearchQuery(text=text, year=year)
+
+
 def validate_tmdb_movie_url(url: str) -> str:
     parsed = urllib.parse.urlparse(url.strip())
     host = parsed.netloc.lower()
@@ -81,52 +106,93 @@ def validate_tmdb_movie_url(url: str) -> str:
     )
 
 
+def extract_year(value: str) -> str:
+    match = re.search(r"\b(?:18|19|20)\d{2}\b", value)
+    return match.group(0) if match else ""
+
+
+def movie_search_section(html: str) -> str:
+    start_match = re.search(r'<div class="search_results movie[^"]*">', html)
+    if not start_match:
+        return ""
+
+    section_start = start_match.end()
+    section = html[section_start:]
+    next_section_match = re.search(r'<div class="search_results (?!movie)', section)
+    if next_section_match:
+        return section[: next_section_match.start()]
+
+    return section
+
+
+def search_card_chunks(section: str) -> list[str]:
+    chunks = re.split(
+        r'(?=<div id="[^"]+" class="[^"]*(?:comp:media-card|card v4 tight))',
+        section,
+    )
+    return [chunk for chunk in chunks if chunk.strip()]
+
+
+def extract_search_result(chunk: str) -> SearchResult | None:
+    href_match = re.search(r'href="(/movie/[^"]+)"', chunk)
+    if not href_match:
+        return None
+
+    title_match = re.search(
+        r"<a[^>]+href=\""
+        + re.escape(href_match.group(1))
+        + r"\"[^>]*>\s*<h2[^>]*>(.*?)</h2>",
+        chunk,
+        re.DOTALL,
+    )
+    if not title_match:
+        title_match = re.search(r"<h2[^>]*>(.*?)</h2>", chunk, re.DOTALL)
+
+    release_match = re.search(
+        r'<span class="[^"]*release_date[^"]*"[^>]*>(.*?)</span>',
+        chunk,
+        re.DOTALL,
+    )
+    description_match = re.search(
+        r'<div class="[^"]*(?:overview|line-clamp-2)[^"]*"[^>]*>\s*<p>(.*?)</p>',
+        chunk,
+        re.DOTALL,
+    )
+
+    release_text = clean_text(release_match.group(1)) if release_match else ""
+    description = (
+        clean_text(description_match.group(1))
+        if description_match
+        else "(No description)"
+    )
+
+    return SearchResult(
+        title=clean_text(title_match.group(1)) if title_match else "Unknown",
+        year=extract_year(release_text),
+        description=description,
+        url=f"{TMDB_BASE_URL}{href_match.group(1)}",
+    )
+
+
 def search_tmdb(query: str) -> list[SearchResult]:
-    encoded = urllib.parse.quote(query)
-    search_url = f"{TMDB_BASE_URL}/search?query={encoded}"
+    search_query = parse_search_query(query)
+    encoded = urllib.parse.urlencode({"query": search_query.text})
+    search_url = f"{TMDB_BASE_URL}/search?{encoded}"
     eprint(f"Searching {search_url} ...")
     html = fetch_html(search_url)
 
-    movie_sec_match = re.search(
-        r'<div class="search_results movie[^"]*">\s*'
-        r'<div class="results flex">(.*?)<div class="pagination_wrapper">',
-        html,
-        re.DOTALL,
-    )
-    if not movie_sec_match:
+    section = movie_search_section(html)
+    if not section:
         return []
 
-    section = movie_sec_match.group(1)
-    card_chunks = re.split(r'(?=<div id="[0-9a-f]+" class="card v4 tight")', section)
-
     results: list[SearchResult] = []
-    for chunk in card_chunks:
-        if not chunk.strip():
+    for chunk in search_card_chunks(section):
+        result = extract_search_result(chunk)
+        if result is None:
             continue
-
-        href_match = re.search(r'href="(/movie/[^"]+)"', chunk)
-        if not href_match:
+        if search_query.year and result.year != search_query.year:
             continue
-
-        title_match = re.search(r"<h2[^>]*>\s*<span>([^<]+)</span>", chunk)
-        year_match = re.search(
-            r'<span class="release_date">[^<]*?(\d{4})[^<]*</span>',
-            chunk,
-        )
-        desc_match = re.search(
-            r'<div class="overview">\s*<p>(.*?)</p>', chunk, re.DOTALL
-        )
-
-        results.append(
-            SearchResult(
-                title=clean_text(title_match.group(1)) if title_match else "Unknown",
-                year=year_match.group(1) if year_match else "",
-                description=clean_text(desc_match.group(1))
-                if desc_match
-                else "(No description)",
-                url=f"{TMDB_BASE_URL}{href_match.group(1)}",
-            )
-        )
+        results.append(result)
         if len(results) >= MAX_SEARCH_RESULTS:
             break
 
