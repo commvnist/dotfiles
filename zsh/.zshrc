@@ -89,3 +89,6 @@ source ~/.scripts/syswatch.zsh
 
 # obsidian movie entry
 source ~/.scripts/obsidian_movie_entry.zsh
+
+# uv tool path
+export PATH="/home/naek/.local/bin:$PATH"
