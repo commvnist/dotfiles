@@ -21,6 +21,7 @@ Stow packages from the repository root:
 ```sh
 stow zsh
 stow kitty
+stow mangohud
 stow starship
 stow tmux
 stow vim
@@ -37,6 +38,7 @@ Use `stow -n -v <package>` for a dry run before linking a package.
   extensions.
 - `docs/arch`: host-level Arch Linux setup notes that are not managed by Stow.
 - `kitty`: Kitty terminal configuration.
+- `mangohud`: MangoHud overlay configuration.
 - `scripts`: user scripts and shell functions.
 - `starship`: Starship prompt configuration.
 - `tmux`: tmux configuration.

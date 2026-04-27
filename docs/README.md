@@ -49,6 +49,7 @@ stow -n -v <package>
 - [gnome-extension-sources](gnome-extension-sources/README.md)
 - [gnome-extensions](gnome-extensions/README.md)
 - [kitty](kitty/README.md)
+- [mangohud](mangohud/README.md)
 - [scripts](scripts/README.md)
 - [starship](starship/README.md)
 - [tmux](tmux/README.md)
