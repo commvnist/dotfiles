@@ -49,5 +49,9 @@ sudo systemd-tmpfiles --create /etc/tmpfiles.d/rapl.conf
 
 Log out and back in after changing group membership.
 
+Battery and AC state are discovered from `/sys/class/power_supply`. `syswatch`
+uses the system battery and ignores device-scoped peripheral batteries when
+multiple power supplies are present.
+
 Movie note creation uses TMDB HTML and writes to
 `$OBSIDIAN_MOVIES_DIR`, defaulting to `~/Documents/naek/movies`.

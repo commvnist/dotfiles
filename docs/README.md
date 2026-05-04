@@ -3,7 +3,9 @@
 This directory documents the `system` repository, its top-level package areas,
 and host-specific Arch Linux GNOME setup notes. The repository is designed for
 GNU Stow: most package directories contain files laid out as they should appear
-under `$HOME`; root-target packages are documented explicitly.
+under `$HOME`; root-target packages are documented explicitly. Boot-critical
+systemd packages should be installed as real files on `/`, not as symlinks into
+`/home`.
 
 ## Common Dependencies
 
@@ -37,17 +39,19 @@ stow zsh
 stow gnome-extensions
 ```
 
-Root-target packages must be stowed into `/` explicitly:
+Root-target packages must follow their package-specific documentation. For
+`rapl-power-limit`, install real files onto `/` because systemd may load enabled
+units before `/home` is mounted:
 
 ```sh
-sudo stow --target=/ rapl-power-limit
+cd /home/naek/system
+less docs/rapl-power-limit/README.md
 ```
 
 Run a dry run before changing links:
 
 ```sh
 stow -n -v <package>
-sudo stow -n -v --target=/ <root-target-package>
 ```
 
 ## Documentation Areas

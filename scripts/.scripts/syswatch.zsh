@@ -354,25 +354,72 @@ syswatch() {
     ' /proc/stat
   }
 
-  _sw_pstate_info() {
-    local nt hb mn mx epp gov ts
-    nt=$(< /sys/devices/system/cpu/intel_pstate/no_turbo              2>/dev/null) || nt=1
-    hb=$(< /sys/devices/system/cpu/intel_pstate/hwp_dynamic_boost     2>/dev/null) || hb=0
-    mn=$(< /sys/devices/system/cpu/intel_pstate/min_perf_pct          2>/dev/null) || mn=0
-    mx=$(< /sys/devices/system/cpu/intel_pstate/max_perf_pct          2>/dev/null) || mx=100
-    epp=$(< /sys/devices/system/cpu/cpu0/cpufreq/energy_performance_preference 2>/dev/null) || epp='?'
-    gov=$(< /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor     2>/dev/null) || gov='?'
-    (( nt == 0 )) && ts='on' || ts='off'
-    printf '%s %s %s %s %s %s' "${gov}" "${epp}" "${ts}" "${hb}" "${mn}" "${mx}"
+  _sw_file_or() {  # _sw_file_or <path> <fallback>
+    local path raw fallback
+    path=${1:-}
+    fallback=${2:-}
+    [[ -n "${path}" ]] || { printf '%s' "${fallback}"; return; }
+    { raw=$(< "${path}"); } 2>/dev/null || { printf '%s' "${fallback}"; return; }
+    printf '%s' "${raw}"
   }
 
   _sw_uint_file_or() {  # _sw_uint_file_or <path> <fallback>
     local raw fallback
     fallback=${2:-0}
-    raw=$(< "${1}" 2>/dev/null) || { printf '%d' "${fallback}"; return; }
+    raw=$(_sw_file_or "${1:-}" "${fallback}")
     raw=${raw//[[:space:]]/}
     raw=$(_sw_int_or "${raw}" "${fallback}")
     printf '%d' "${raw}"
+  }
+
+  _sw_system_battery_dir() {
+    local psdir ptype scope
+
+    # Prefer the internal laptop battery and ignore device-scoped peripherals
+    # such as wireless mouse batteries that also appear in power_supply.
+    if [[ -e /sys/class/power_supply/BAT0 ]]; then
+      ptype=$(_sw_file_or /sys/class/power_supply/BAT0/type '')
+      scope=$(_sw_file_or /sys/class/power_supply/BAT0/scope 'System')
+      if [[ "${ptype:l}" == 'battery' && "${scope:l}" != 'device' ]]; then
+        printf '%s' /sys/class/power_supply/BAT0
+        return
+      fi
+    fi
+
+    for psdir in /sys/class/power_supply/*(N); do
+      ptype=$(_sw_file_or "${psdir}/type" '')
+      scope=$(_sw_file_or "${psdir}/scope" 'System')
+      if [[ "${ptype:l}" == 'battery' && "${scope:l}" != 'device' ]]; then
+        printf '%s' "${psdir}"
+        return
+      fi
+    done
+  }
+
+  _sw_ac_online() {
+    local psdir ptype online
+
+    for psdir in /sys/class/power_supply/*(N); do
+      ptype=$(_sw_file_or "${psdir}/type" '')
+      [[ "${ptype:l}" == 'battery' ]] && continue
+
+      online=$(_sw_uint_file_or "${psdir}/online" 0)
+      (( online > 0 )) && { printf '1'; return; }
+    done
+
+    printf '0'
+  }
+
+  _sw_pstate_info() {
+    local nt hb mn mx epp gov ts
+    nt=$(_sw_uint_file_or /sys/devices/system/cpu/intel_pstate/no_turbo 1)
+    hb=$(_sw_uint_file_or /sys/devices/system/cpu/intel_pstate/hwp_dynamic_boost 0)
+    mn=$(_sw_uint_file_or /sys/devices/system/cpu/intel_pstate/min_perf_pct 0)
+    mx=$(_sw_uint_file_or /sys/devices/system/cpu/intel_pstate/max_perf_pct 100)
+    epp=$(_sw_file_or /sys/devices/system/cpu/cpu0/cpufreq/energy_performance_preference '?')
+    gov=$(_sw_file_or /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor '?')
+    (( nt == 0 )) && ts='on' || ts='off'
+    printf '%s %s %s %s %s %s' "${gov}" "${epp}" "${ts}" "${hb}" "${mn}" "${mx}"
   }
 
   _sw_power_microwatts_to_watts() {  # _sw_power_microwatts_to_watts <microwatts>
@@ -393,14 +440,28 @@ syswatch() {
   }
 
   _sw_battery() {
-    local bdir en ef pn current_ua voltage_uv watts st
-    bdir='/sys/class/power_supply/BAT0'
+    local bdir en ef pn current_ua voltage_uv watts st capacity pct
+    bdir=$(_sw_system_battery_dir)
+    if [[ -z "${bdir}" ]]; then
+      printf '0\n0\nunavailable\n'
+      return
+    fi
+
     en=$(_sw_uint_file_or "${bdir}/energy_now" 0)
     ef=$(_sw_uint_file_or "${bdir}/energy_full" 0)
     if (( ef <= 0 )); then
       en=$(_sw_uint_file_or "${bdir}/charge_now" 0)
       ef=$(_sw_uint_file_or "${bdir}/charge_full" 0)
     fi
+    capacity=$(_sw_uint_file_or "${bdir}/capacity" 0)
+    if (( capacity > 0 )); then
+      pct=${capacity}
+    elif (( ef > 0 )); then
+      pct=$(( en * 100 / ef ))
+    else
+      pct=0
+    fi
+    (( pct > 100 )) && pct=100
 
     # Linux power_supply reports power_now in microwatts, not milliwatts.
     pn=$(_sw_uint_file_or "${bdir}/power_now" 0)
@@ -412,10 +473,10 @@ syswatch() {
       watts=$(_sw_current_voltage_to_watts "${current_ua}" "${voltage_uv}")
     fi
 
-    st=$(< "${bdir}/status" 2>/dev/null) || st='?'
+    st=$(_sw_file_or "${bdir}/status" '?')
     [[ -n "${st}" ]] || st='?'
     # Newline-separated so multi-word status (e.g. "Not charging") is preserved
-    printf '%d\n%d\n%s\n' "$(( ef > 0 ? en * 100 / ef : 0 ))" "${watts}" "${st}"
+    printf '%d\n%d\n%s\n' "${pct}" "${watts}" "${st}"
   }
 
   _sw_nvidia() {
@@ -449,8 +510,8 @@ syswatch() {
     # Non-zero TW_CPU_MAX_MHZ = use it as the bar ceiling; 0 = auto from sysfs
     (( CPU_MAX > 0 )) && { printf '%d' "${CPU_MAX}"; return; }
     local v
-    v=$(< /sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq 2>/dev/null)
-    printf '%d' "$(( ${v:-5400000} / 1000 ))"
+    v=$(_sw_uint_file_or /sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq 5400000)
+    printf '%d' "$(( v / 1000 ))"
   }
 
   _sw_nvidia_max() {
@@ -661,20 +722,20 @@ syswatch() {
       ps=($(_sw_pstate_info))
       gov=${ps[1]}; epp=${ps[2]}; turbo=${ps[3]}; hwpb=${ps[4]}; pmin=${ps[5]}; pmax=${ps[6]}
 
-      prof=$(< /sys/firmware/acpi/platform_profile 2>/dev/null) || prof='?'
-      pwrsrc=$(< /sys/class/power_supply/AC/online 2>/dev/null) || pwrsrc='0'
+      prof=$(_sw_file_or /sys/firmware/acpi/platform_profile '?')
+      pwrsrc=$(_sw_ac_online)
       [[ "${pwrsrc}" == '1' ]] && pwrsrc='AC' || pwrsrc='BAT'
 
       bi=("${(@f)$(_sw_battery)}")
       bpct=${bi[1]}; bwatt=${bi[2]}; bst=${bi[3]}
 
       # RAPL CPU package power (uJ counter delta / us elapsed = W)
-      rapl_e_now=$(< /sys/class/powercap/intel-rapl/intel-rapl:0/energy_uj 2>/dev/null) || rapl_e_now=0
+      rapl_e_now=$(_sw_uint_file_or /sys/class/powercap/intel-rapl/intel-rapl:0/energy_uj 0)
       rapl_t_now=$(( EPOCHREALTIME * 1000000 ))
       if (( rapl_e_prev > 0 && rapl_t_now > rapl_t_prev )); then
         rapl_de=$(( rapl_e_now - rapl_e_prev ))
         if (( rapl_de < 0 )); then
-          rapl_emax=$(< /sys/class/powercap/intel-rapl/intel-rapl:0/max_energy_range_uj 2>/dev/null) || rapl_emax=0
+          rapl_emax=$(_sw_uint_file_or /sys/class/powercap/intel-rapl/intel-rapl:0/max_energy_range_uj 0)
           (( rapl_emax > 0 )) && rapl_de=$(( rapl_de + rapl_emax ))
         fi
         rapl_dt=$(( rapl_t_now - rapl_t_prev ))
